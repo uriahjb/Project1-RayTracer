@@ -22,6 +22,8 @@
     #include <cutil_math.h>
 #endif
 
+#define M_PI 3.14159265359.0f
+
 void checkCUDAError(const char *msg) {
   cudaError_t err = cudaGetLastError();
   if( cudaSuccess != err) {
@@ -44,9 +46,18 @@ __host__ __device__ glm::vec3 generateRandomNumberFromThread(glm::vec2 resolutio
 //TODO: IMPLEMENT THIS FUNCTION
 //Function that does the initial raycast from the camera
 __host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time, int x, int y, glm::vec3 eye, glm::vec3 view, glm::vec3 up, glm::vec2 fov){
+  	// Create ray using pinhole camera projection
+  float px_size_x = tan( fov.x * (PI/180.0) );
+  float px_size_y = tan( fov.y * (PI/180.0) );
+	
   ray r;
-  r.origin = glm::vec3(0,0,0);
-  r.direction = glm::vec3(0,0,-1);
+  r.origin = eye;
+  r.direction = view + (2*px_size_x*x/resolution.x - px_size_x)*glm::cross( view, up ) \
+				     + (2*px_size_y*y/resolution.y - px_size_y)*up;
+
+  
+  //r.origin = glm::vec3(0,0,0);
+  //r.direction = glm::vec3(0,0,-1);
   return r;
 }
 
@@ -103,10 +114,39 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
   int index = x + (y * resolution.x);
 
-  if((x<=resolution.x && y<=resolution.y)){
+  ray r;
+  float intersection_dist;
+  glm::vec3 intersection_point;
+  glm::vec3 intersection_normal;
 
-    colors[index] = generateRandomNumberFromThread(resolution, time, x, y);
-   }
+  /*
+  float px_size_x = tan( cam.fov.x * (PI/180.0) );
+  float px_size_y = tan( cam.fov.y * (PI/180.0) );
+  */
+
+  if((x<=resolution.x && y<=resolution.y)){
+	  
+	// Create ray using pinhole camera projection
+	/*
+	r.origin = cam.position;
+	r.direction = cam.view + (2*px_size_x*x/cam.resolution.x - px_size_x)*glm::cross( cam.view, cam.up ) \
+						   + (2*px_size_y*y/cam.resolution.y - px_size_y)*cam.up;
+    */
+	ray r = raycastFromCameraKernel( cam.resolution, time, x, y, cam.position, cam.view, cam.up, cam.fov );
+	// Check for intersections ... TODO choose closest intersection
+	for (int i=0; i < numberOfGeoms; ++i ) {
+	    // Check for intersection with Sphere
+		if ( geoms[i].type == SPHERE ) {
+		    intersection_dist = sphereIntersectionTest(geoms[i], r, intersection_point, intersection_normal);
+			if (intersection_dist != -1 ) {
+				colors[index] = glm::vec3( 255, 0, 0 );
+			} else {
+				colors[index] = glm::vec3( 0, 255, 0 );
+			}
+		}	
+	}
+    //colors[index] = generateRandomNumberFromThread(resolution, time, x, y);
+  }
 }
 
 //TODO: FINISH THIS FUNCTION

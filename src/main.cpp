@@ -121,7 +121,22 @@ void runCuda(){
       materials[i] = renderScene->materials[i];
     }
     
-  
+	// DEBUGGING
+	/*
+	ray r;
+	camera cam = *renderCam;
+	int x = 400;
+	int y = 400;
+	float px_size_x = tan( cam.fov.x * (PI/180.0) );
+	float px_size_y = tan( cam.fov.y * (PI/180.0) );
+
+	r.direction = cam.views[0] + px_size_x*x/cam.resolution.x*glm::cross( cam.views[0], cam.ups[0] ) \
+							   + px_size_y*y/cam.resolution.y*cam.ups[0];
+	printf( "Camera view: [%f, %f, %f] \n\r", cam.views[0].x, cam.views[0].y, cam.views[0].z );
+	printf( "Camera fov: [%f, %f] \n\r", cam.fov.x, cam.fov.y ); 
+	printf( "ray direction: [%f, %f, %f] \n\r", r.direction.x, r.direction.y, r.direction.z);
+    */
+
     // execute the kernel
     cudaRaytraceCore(dptr, renderCam, targetFrame, iterations, materials, renderScene->materials.size(), geoms, renderScene->objects.size() );
     
