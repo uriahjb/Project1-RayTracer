@@ -7,6 +7,18 @@ Due Thursday, 09/19/2013
 -------------------------------------------------------------------------------
 
 -------------------------------------------------------------------------------
+PROJECT UPDATES:
+-------------------------------------------------------------------------------
+09/14/2013:
+* Implemented raytrace from camera and tested that the raytracing was working 
+  by sending out a ray per thread and checking for sphere collisions. At the moment
+  I have a funky issue whereby only one sphere is ever detected even though
+  multiple may be in view.
+
+![screenshot](https://raw.github.com/uriahjb/Project1-RayTracer/master/renders/first_steps.png)
+
+
+-------------------------------------------------------------------------------
 NOTE:
 -------------------------------------------------------------------------------
 This project requires an NVIDIA graphics card with CUDA capability! Any card
