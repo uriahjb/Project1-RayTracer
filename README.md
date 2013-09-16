@@ -14,7 +14,7 @@ PROJECT UPDATES:
 * Added Phong lighting ( ambient, diffuse, and specular ) as per:
   http://en.wikipedia.org/wiki/Phong_reflection_model
 * At the moment my code implements all functionality in a single raytracer
-  kernel, its probably not very efficient. My goal is first to fulfill
+  kernel per pixel, its probably not very efficient. My goal is first to fulfill
   the requirements of the project and then improve efficiency. My current
   naive implementation will hopefully provide a nice baseline. 
 
