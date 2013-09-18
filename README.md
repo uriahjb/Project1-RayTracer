@@ -9,6 +9,17 @@ Due Thursday, 09/19/2013
 -------------------------------------------------------------------------------
 PROJECT UPDATES:
 -------------------------------------------------------------------------------
+09/15/2013:
+* Fixed logic bug causing only one object to render at a time
+* Added Phong lighting ( ambient, diffuse, and specular ) as per:
+  http://en.wikipedia.org/wiki/Phong_reflection_model
+* At the moment my code implements all functionality in a single raytracer
+  thread per pixel, its probably not very efficient. My goal is first to fulfill
+  the requirements of the project and then improve efficiency. My current
+  naive implementation will hopefully provide a nice baseline. 
+
+![screenshot](https://raw.github.com/uriahjb/Project1-RayTracer/master/renders/phong_lighting.png)
+
 09/14/2013:
 * Implemented raytrace from camera and tested that the raytracing was working 
   by sending out a ray per thread and checking for sphere collisions. At the moment
