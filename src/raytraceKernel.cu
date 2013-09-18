@@ -61,6 +61,81 @@ __host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time
   return r;
 }
 
+__host__ __device__ glm::vec3 computeGeomColor( int min_intersection_ind, staticGeom* geoms, material* materials, ray r, float intersection_dist, glm::vec3 intersection_normal, glm::vec3 intersection_point ) {
+	// Set color equal to material color
+	int mat_id = geoms[min_intersection_ind].materialid;
+	//colors[index] = materials[mat_id].color;
+
+	// Calculate Phong Lighting
+	// Start with arbritrarily chosen light source, lets say from the camera
+		
+	glm::vec3 debug_light_source(0.0, 0.0, 0.0);
+	glm::vec3 light_vector = glm::normalize(debug_light_source - intersection_point);
+
+	glm::vec3 viewing_vector = glm::normalize( r.origin - intersection_point ); 
+	glm::vec3 reflection_vector = 2*glm::dot( light_vector, intersection_normal )*intersection_normal - light_vector;
+		
+	// Calculate Phong Reflection Model ... this is mad inefficient at the moment
+	//float m_d = 1.0; //?
+	//float s_d = 1.0; //?
+	//float c_d = s_d*m_d*max( glm::dot( intersection_normal, light_vector ), 0.0 );
+	//float c_d = powf( max( glm::dot( light_vector, viewing_vector ), 0.0 ), materials[mat_id].specularExponent );
+	float ks = 1.0; // specular reflection constant
+	float kd = 0.5; // diffuse reflection constant
+	float ka = 0.5; // ambient reflection constant
+
+	// Ambient Component
+	glm::vec3 ambient(1.0, 1.0, 1.0);
+
+	// Diffuse Component
+	//glm::vec3 diffuseIntensity( 1.0, 1.0, 1.0 ); Not needed at the moment
+	float diffuse = max(glm::dot( light_vector, intersection_normal ), 0.0);
+
+	// Specular Component  
+	float specularExponent = materials[mat_id].specularExponent; // alpha, shinyiness
+	glm::vec3 specColor = materials[mat_id].specularColor;
+	glm::vec3 specular( 0.0, 0.0, 0.0 );
+		
+	if ( specularExponent > 0.0 ) {
+		specular = specColor*powf( max( glm::dot( reflection_vector, viewing_vector ), 0.0 ), specularExponent );
+	} 
+		
+	// Full illumination
+	glm::vec3 Illumination = ka*ambient + kd*diffuse + ks*specular;
+	return Illumination*materials[mat_id].color;
+}
+	
+__host__ __device__ int closestIntersection( ray r, staticGeom* geoms, int numberOfGeoms, float& intersection_dist, glm::vec3& intersection_normal, glm::vec3& intersection_point ) {
+	// Check for intersections. This has way too many branches :/
+	int min_intersection_ind = -1;
+	float intersection_dist_new;
+	glm::vec3 intersection_point_new;
+	glm::vec3 intersection_normal_new;
+
+	for (int i=0; i < numberOfGeoms; ++i ) {
+	    // Check for intersection with Sphere
+		if ( geoms[i].type == SPHERE ) {
+		    intersection_dist_new = sphereIntersectionTest(geoms[i], r, intersection_point_new, intersection_normal_new);		
+						
+		} else if ( geoms[i].type == CUBE ) {
+			intersection_dist_new = boxIntersectionTest(geoms[i], r, intersection_point_new, intersection_normal_new);		
+		} else if ( geoms[i].type == MESH ) {
+			// TODO
+		}
+		if (intersection_dist_new != -1 ) {
+			
+			// If new distance is closer than previously seen one then use the new one
+			if ( intersection_dist_new < intersection_dist || intersection_dist == -1 ) {
+				intersection_dist = intersection_dist_new;
+				intersection_point = intersection_point_new;
+				intersection_normal = intersection_normal_new;
+				min_intersection_ind = i;
+			}
+		}	
+	}
+	return min_intersection_ind;
+}
+
 //Kernel that blacks out a given image buffer
 __global__ void clearImage(glm::vec2 resolution, glm::vec3* image){
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -137,6 +212,8 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 						   + (2*px_size_y*y/cam.resolution.y - px_size_y)*cam.up;
     */
 	ray r = raycastFromCameraKernel( cam.resolution, time, x, y, cam.position, cam.view, cam.up, cam.fov );
+	min_intersection_ind = closestIntersection( r, geoms, numberOfGeoms, intersection_dist, intersection_normal, intersection_point );
+	/*
 	// Check for intersections. This has way too many branches :/
 	for (int i=0; i < numberOfGeoms; ++i ) {
 	    // Check for intersection with Sphere
@@ -144,7 +221,7 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 		    intersection_dist_new = sphereIntersectionTest(geoms[i], r, intersection_point_new, intersection_normal_new);		
 						
 		} else if ( geoms[i].type == CUBE ) {
-			// TODO
+			intersection_dist_new = boxIntersectionTest(geoms[i], r, intersection_point_new, intersection_normal_new);		
 		} else if ( geoms[i].type == MESH ) {
 			// TODO
 		}
@@ -159,14 +236,17 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 			}
 		}	
 	}
+	*/
 	if (intersection_dist != -1 ) {
+		colors[index] = computeGeomColor( min_intersection_ind, geoms, materials, r, intersection_dist, intersection_normal, intersection_point );
+		/*
 		// Set color equal to material color
 		int mat_id = geoms[min_intersection_ind].materialid;
 		//colors[index] = materials[mat_id].color;
 
 		// Calculate Phong Lighting
 		// Start with arbritrarily chosen light source, lets say from the camera
-
+		
 		glm::vec3 debug_light_source(0.0, 0.0, 0.0);
 
 		glm::vec3 light_vector = glm::normalize(debug_light_source - intersection_point);
@@ -201,7 +281,9 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 		// Full illumination
 		glm::vec3 Illumination = ka*ambient + kd*diffuse + ks*specular;
 		colors[index] =  Illumination*materials[mat_id].color;
+		
 		//colors[index] = glm::vec3( 255, 0, 0 );
+		*/
 	} else {
 		colors[index] = glm::vec3( 0, 0, 0 );
 	}

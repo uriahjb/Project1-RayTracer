@@ -15,6 +15,7 @@
 //Some forward declarations
 __host__ __device__ glm::vec3 getPointOnRay(ray r, float t);
 __host__ __device__ glm::vec3 multiplyMV(cudaMat4 m, glm::vec4 v);
+__host__ __device__ cudaMat4 removeScale( cudaMat4 m, glm::vec3 scale );
 __host__ __device__ glm::vec3 getSignOfRay(ray r);
 __host__ __device__ glm::vec3 getInverseDirectionOfRay(ray r);
 __host__ __device__ float boxIntersectionTest(staticGeom sphere, ray r, glm::vec3& intersectionPoint, glm::vec3& normal);
@@ -57,6 +58,25 @@ __host__ __device__ glm::vec3 multiplyMV(cudaMat4 m, glm::vec4 v){
   return r;
 }
 
+// Remove the scale from the transformation matrix so that we can perform 
+// matrix operations on vectors etc without having the scale of these 
+// vectors messed with 
+__host__ __device__ cudaMat4 removeScale( cudaMat4 m, glm::vec3 scale ) {
+	// The scale is either distributed along each row of the rotation matrix
+	// or along each column. I'm not entirely sure which yet. 
+	cudaMat4 n = m;
+	n.x.x = m.x.x/scale[0];
+	n.x.y = m.x.y/scale[0];
+	n.x.z = m.x.z/scale[0];
+	n.y.x = m.y.x/scale[1];
+	n.y.y = m.y.y/scale[1];
+	n.y.z = m.y.z/scale[1];
+	n.z.x = m.z.x/scale[2];
+	n.z.y = m.z.y/scale[2];
+	n.z.z = m.z.z/scale[2];
+	return n;
+}
+
 //Gets 1/direction for a ray
 __host__ __device__ glm::vec3 getInverseDirectionOfRay(ray r){
   return glm::vec3(1.0/r.direction.x, 1.0/r.direction.y, 1.0/r.direction.z);
@@ -71,8 +91,73 @@ __host__ __device__ glm::vec3 getSignOfRay(ray r){
 //TODO: IMPLEMENT THIS FUNCTION
 //Cube intersection test, return -1 if no intersection, otherwise, distance to intersection
 __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& intersectionPoint, glm::vec3& normal){
+	/*
+		Compute cube intersection using line-plane intersection as per wikipedia
+		en.wikipedia/wiki/Line-Plane_Intersection
 
-    return -1;
+		For each normal of the plane compute:
+			d = dot((p0 - l0), n) / dot(l, n) checking for parallel and in-plane conditions
+		
+		Find the closest intersection point and check if it is within the x-y-z bounds of the cube
+	*/
+	// Convert global ray coordinates to local box coordinates   
+	cudaMat4 inv_tf_no_scale = removeScale( box.inverseTransform, glm::vec3( 1/box.scale.x, 1/box.scale.y, 1/box.scale.z));
+
+	glm::vec3 ro = multiplyMV(inv_tf_no_scale, glm::vec4(r.origin,1.0f));
+	glm::vec3 rd = glm::normalize(multiplyMV(inv_tf_no_scale, glm::vec4(r.direction,0.0f)));
+	ray rt; rt.origin = ro; rt.direction = rd;
+	
+	bool is_valid = false;
+	float t;
+	float min_t = 0;
+	glm::vec3 face_pos;
+	glm::vec3 face_pos_norm;
+
+	for (int i=0; i < 6; ++i ) {
+		//glm::vec3 face_pos(  0.0,  0.0,  0.0 );
+		//glm::vec3 face_pos_norm( 0.0,  0.0,  1.0);
+		int ind = i % 3;
+		face_pos = glm::vec3( 0.0, 0.0, 0.0 );
+		face_pos_norm = glm::vec3( 0.0, 0.0, 0.0 );
+		if ( i < 3 ) {
+			face_pos[ind] = box.scale[ind]/2;
+			face_pos_norm[ind] = 1.0;
+		} else {
+			face_pos[ind] = -box.scale[ind]/2;
+			face_pos_norm[ind] = -1.0;
+		}
+		float den = glm::dot( rt.direction, face_pos_norm );
+		float num = glm::dot( face_pos - rt.origin, face_pos_norm );
+
+		float tol = 1e-6;
+		if ( abs(num) < tol && abs(den) < tol ) {
+			continue;
+		}
+		t = num/den;
+		// add 0.001 to account for the 0.001 subtracted in getPointOnRay
+		glm::vec3 localIntersectionPoint = getPointOnRay( rt, t + 0.001 );
+		if ( localIntersectionPoint.x >= box.scale.x/2 || localIntersectionPoint.x <= -box.scale.x/2 
+		  || localIntersectionPoint.y >= box.scale.y/2 || localIntersectionPoint.y <= -box.scale.y/2
+		  || localIntersectionPoint.z >= box.scale.z/2 || localIntersectionPoint.z <= -box.scale.z/2) {
+			continue;
+		}
+		min_t = min(t, min_t);
+		is_valid = true;
+	}
+	if (!is_valid) {
+		return -1;
+	}
+
+	//float t = 0.0;
+	cudaMat4 tf_no_scale = removeScale( box.transform, box.scale );
+	glm::vec3 realIntersectionPoint = multiplyMV(tf_no_scale, glm::vec4(getPointOnRay(rt, t), 1.0));
+    glm::vec3 realOrigin = multiplyMV(tf_no_scale, glm::vec4(0,0,0,1));
+	
+    intersectionPoint = realIntersectionPoint;
+    normal = glm::normalize(realIntersectionPoint - realOrigin);
+
+	return t;
+    //return glm::length(r.origin - realIntersectionPoint);
 }
 
 //LOOK: Here's an intersection test example from a sphere. Now you just need to figure out cube and, optionally, triangle.

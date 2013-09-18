@@ -96,6 +96,45 @@ int main(int argc, char** argv){
   return 0;
 }
 
+//Some forward declarations
+__host__ __device__ glm::vec3 multiplyMVDbg(cudaMat4 m, glm::vec4 v);
+
+//LOOK: This is a custom function for multiplying cudaMat4 4x4 matrixes with vectors.
+//This is a workaround for GLM matrix multiplication not working properly on pre-Fermi NVIDIA GPUs.
+//Multiplies a cudaMat4 matrix and a vec4 and returns a vec3 clipped from the vec4
+__host__ __device__ glm::vec3 multiplyMVDbg(cudaMat4 m, glm::vec4 v){
+  glm::vec3 r(1,1,1);
+  r.x = (m.x.x*v.x)+(m.x.y*v.y)+(m.x.z*v.z)+(m.x.w*v.w);
+  r.y = (m.y.x*v.x)+(m.y.y*v.y)+(m.y.z*v.z)+(m.y.w*v.w);
+  r.z = (m.z.x*v.x)+(m.z.y*v.y)+(m.z.z*v.z)+(m.z.w*v.w);
+  return r;
+}
+
+__host__ __device__ cudaMat4 removeScaleDbg( cudaMat4 m, glm::vec3 scale ) {
+	// The scale is either distributed along each row of the rotation matrix
+	// or along each column. I'm not entirely sure which yet. 
+	cudaMat4 n = m;
+	n.x.x = m.x.x/scale[0];
+	n.x.y = m.x.y/scale[0];
+	n.x.z = m.x.z/scale[0];
+	n.y.x = m.y.x/scale[1];
+	n.y.y = m.y.y/scale[1];
+	n.y.z = m.y.z/scale[1];
+	n.z.x = m.z.x/scale[2];
+	n.z.y = m.z.y/scale[2];
+	n.z.z = m.z.z/scale[2];
+	return n;
+}
+
+void printMat4( cudaMat4 mat ) {
+	int i,j;
+	printf( "[[%f, %f, %f, %f]\n,[%f,%f,%f, %f]\n,[%f,%f,%f, %f],\n[%f, %f, %f, %f]]\n", \
+			 mat.x.x, mat.x.y, mat.x.z, mat.x.w, \
+			 mat.y.x, mat.y.y, mat.y.z, mat.y.w, \
+			 mat.z.x, mat.z.y, mat.z.z, mat.z.w, \
+			 mat.w.x, mat.w.y, mat.w.z, mat.w.w );		
+}
+
 //-------------------------------
 //---------RUNTIME STUFF---------
 //-------------------------------
@@ -136,6 +175,81 @@ void runCuda(){
 	printf( "Camera fov: [%f, %f] \n\r", cam.fov.x, cam.fov.y ); 
 	printf( "ray direction: [%f, %f, %f] \n\r", r.direction.x, r.direction.y, r.direction.z);
     */
+    // DEBUGGING LINE-PLANE INTERSECTION
+	// Pull box outta geoms
+
+	  //package geometry and materials and sent to GPU
+	  int numberOfGeoms = renderScene->objects.size();
+	  int frame = 0;
+	  staticGeom* geomList = new staticGeom[numberOfGeoms];
+	  for(int i=0; i<numberOfGeoms; i++){
+		staticGeom newStaticGeom;
+		newStaticGeom.type = geoms[i].type;
+		newStaticGeom.materialid = geoms[i].materialid;
+		newStaticGeom.translation = geoms[i].translations[frame];
+		newStaticGeom.rotation = geoms[i].rotations[frame];
+		newStaticGeom.scale = geoms[i].scales[frame];
+		newStaticGeom.transform = geoms[i].transforms[frame];
+		newStaticGeom.inverseTransform = geoms[i].inverseTransforms[frame];
+		geomList[i] = newStaticGeom;
+	  }
+
+	
+    camera cam = *renderCam;
+	
+	int x = 200;
+	int y = 200;
+
+	staticGeom box = geomList[3];
+	float px_size_x = tan( cam.fov.x * (PI/180.0) );
+	float px_size_y = tan( cam.fov.y * (PI/180.0) );
+	
+	ray r;
+	r.origin = cam.positions[0];
+	r.direction = cam.views[0] + (2*px_size_x*x/cam.resolution.x - px_size_x)*glm::cross( cam.positions[0], cam.ups[0] ) \
+       				           + (2*px_size_y*y/cam.resolution.y - px_size_y)*cam.ups[0];
+	// There are few things more frustrating than a transformation matrix that has the 
+	// scale rolled into it. 
+	printf( "box tf: \n" );
+	printMat4( box.transform );
+	printf( "box tf no scale: \n" );
+	printMat4( removeScaleDbg(box.transform, box.scale) );
+	printf( "box inv tf: \n");
+	printMat4( box.inverseTransform );
+	printf( "box inv tf no scale: \n");
+	printMat4( removeScaleDbg(box.inverseTransform, glm::vec3( 1/box.scale.x, 1/box.scale.y, 1/box.scale.z)) );
+
+	
+	//glm::vec3 ro = multiplyMVDbg(box.inverseTransform, glm::vec4(r.origin,1.0f));
+	//glm::vec3 rd = glm::normalize(multiplyMVDbg(box.inverseTransform, glm::vec4(r.direction,0.0f)));
+
+	cudaMat4 inv_tf_no_scale = removeScaleDbg( box.inverseTransform,  glm::vec3( 1/box.scale.x, 1/box.scale.y, 1/box.scale.z));
+
+	glm::vec3 ro = multiplyMVDbg(inv_tf_no_scale, glm::vec4(r.origin,1.0f));
+	glm::vec3 rd = glm::normalize(multiplyMVDbg(inv_tf_no_scale, glm::vec4(r.direction,0.0f)));
+
+	ray rt; rt.origin = ro; rt.direction = rd;
+
+	glm::vec3 zf_pos(  0.0,  0.0,  0.0 );
+	glm::vec3 zf_pos_norm( 0.0,  0.0,  1.0);
+	float den = glm::dot( rt.direction, zf_pos_norm );
+	float num = glm::dot( zf_pos - rt.origin, zf_pos_norm );
+
+	printf( "box position: [%f, %f, %f] \n", box.translation.x, box.translation.y, box.translation.z ); 
+	printf( "ray origin: [%f, %f, %f] \n", r.origin.x, r.origin.y, r.origin.z );
+    printf( "ray direction: [%f, %f, %f] \n", r.direction.x, r.direction.y, r.direction.z );
+	printf( "ray tf origin: [%f, %f, %f] \n", rt.origin.x, rt.origin.y, rt.origin.z );
+	printf( "ray tf direction: [%f, %f, %f] \n", rt.direction.x, rt.direction.y, rt.direction.z );
+	printf( "den: %f \n", den );
+	printf( "num: %f \n", num );
+	float tol = 1e-6;
+	if (abs(num) > tol && abs(den) > tol) {
+		float d = num/den;
+		glm::vec3 intersection_point = rt.origin + d*glm::normalize( rt.direction );
+		printf( "intersection_point:  [%f, %f, %f] \n", intersection_point.x, intersection_point.y, intersection_point.z ); 
+	}
+	
+
 
     // execute the kernel
     cudaRaytraceCore(dptr, renderCam, targetFrame, iterations, materials, renderScene->materials.size(), geoms, renderScene->objects.size() );
