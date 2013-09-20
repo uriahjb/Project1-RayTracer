@@ -177,7 +177,7 @@ void runCuda(){
     */
     // DEBUGGING LINE-PLANE INTERSECTION
 	// Pull box outta geoms
-
+	/*
 	  //package geometry and materials and sent to GPU
 	  int numberOfGeoms = renderScene->objects.size();
 	  int frame = 0;
@@ -248,7 +248,7 @@ void runCuda(){
 		glm::vec3 intersection_point = rt.origin + d*glm::normalize( rt.direction );
 		printf( "intersection_point:  [%f, %f, %f] \n", intersection_point.x, intersection_point.y, intersection_point.z ); 
 	}
-	
+	*/
 
 
     // execute the kernel

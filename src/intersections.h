@@ -100,6 +100,7 @@ __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& 
 		
 		Find the closest intersection point and check if it is within the x-y-z bounds of the cube
 	*/
+
 	// Convert global ray coordinates to local box coordinates   
 	cudaMat4 inv_tf_no_scale = removeScale( box.inverseTransform, glm::vec3( 1/box.scale.x, 1/box.scale.y, 1/box.scale.z));
 
@@ -130,7 +131,10 @@ __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& 
 		float num = glm::dot( face_pos - rt.origin, face_pos_norm );
 
 		float tol = 1e-6;
-		if ( abs(num) < tol && abs(den) < tol ) {
+		if ( abs(num) < tol ) {
+			continue;
+		}
+		if ( abs(den) < tol ) {
 			continue;
 		}
 		t = num/den;

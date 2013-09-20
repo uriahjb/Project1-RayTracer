@@ -52,12 +52,9 @@ __host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time
 	
   ray r;
   r.origin = eye;
-  r.direction = view + (2*px_size_x*x/resolution.x - px_size_x)*glm::cross( view, up ) \
-				     + (2*px_size_y*y/resolution.y - px_size_y)*up;
+  r.direction = view + (-2*px_size_x*x/resolution.x + px_size_x)*glm::cross( view, up ) \
+				     + (-2*px_size_y*y/resolution.y + px_size_y)*up;
 
-  
-  //r.origin = glm::vec3(0,0,0);
-  //r.direction = glm::vec3(0,0,-1);
   return r;
 }
 
@@ -104,7 +101,37 @@ __host__ __device__ glm::vec3 computeGeomColor( int min_intersection_ind, static
 	glm::vec3 Illumination = ka*ambient + kd*diffuse + ks*specular;
 	return Illumination*materials[mat_id].color;
 }
+
+// Compute Light Contribution to object
+__host__ __device__ glm::vec3 computeLightContribution(  material mat, ray current_ray, ray light_ray, glm::vec3 intersection_normal, glm::vec3 intersection_point ) {
+	glm::vec3 light_vector = light_ray.direction;
+	glm::vec3 viewing_vector = glm::normalize( current_ray.origin - intersection_point ); 
+	glm::vec3 reflection_vector = 2*glm::dot( light_vector, intersection_normal )*intersection_normal - light_vector;
 	
+	// Temporarily
+	float ka = 0.5; // ambient 
+	float ks = 1.0; // specular reflection constant
+	float kd = 0.5; // diffuse reflection constant
+
+	glm::vec3 ambient( 1.0, 1.0, 1.0 );
+
+	float diffuse = max(glm::dot( light_vector, intersection_normal ), 0.0);
+
+	// Specular Component  
+	float specularExponent = mat.specularExponent; // alpha, shinyiness
+	glm::vec3 specColor = mat.specularColor;
+	glm::vec3 specular( 0.0, 0.0, 0.0 );
+		
+	if ( specularExponent > 0.0 ) {
+		specular = specColor*powf( max( glm::dot( reflection_vector, viewing_vector ), 0.0 ), specularExponent );
+	} 
+		
+	// Full illumination
+	glm::vec3 illumination = ka*ambient + kd*diffuse + ks*specular;
+	return illumination*mat.color;
+}
+
+// Find closest intersection
 __host__ __device__ int closestIntersection( ray r, staticGeom* geoms, int numberOfGeoms, float& intersection_dist, glm::vec3& intersection_normal, glm::vec3& intersection_point ) {
 	// Check for intersections. This has way too many branches :/
 	int min_intersection_ind = -1;
@@ -134,6 +161,46 @@ __host__ __device__ int closestIntersection( ray r, staticGeom* geoms, int numbe
 		}	
 	}
 	return min_intersection_ind;
+}
+
+// Check if ray to light is occluded by an object
+// This is going to be super inefficient, for each geom check if its a light if so trace a ray to 
+// it and see if that intersects with any other geoms. 
+__host__ __device__ int isShadowRay( glm::vec3 light, ray &light_ray, staticGeom* geoms, int numberOfGeoms, material* materials, int numberOfMaterials, glm::vec3 intersection_point ) {
+	// DOESN'T WORK YET!?!?
+	
+	// Ray to light
+    light_ray.origin = intersection_point;
+	
+	int obj_ind = -1;
+	
+	glm::vec3 light_vector;
+	
+	// Unfortunately I don't really care about these, I should probably do a refactor
+	glm::vec3 obstacle_intersection_normal;
+	glm::vec3 obstacle_intersection_point;
+	float obstacle_intersection_dist;
+	
+	// Closest light index
+	int light_index = -1;
+
+	light_ray.direction = glm::normalize(light - intersection_point);
+
+	ray intersection_ray;
+	intersection_ray.origin = intersection_point;
+	intersection_ray.direction = light_ray.direction;
+
+	obj_ind = closestIntersection( intersection_ray, geoms, numberOfGeoms, obstacle_intersection_dist, obstacle_intersection_normal, obstacle_intersection_point );
+	
+	return obj_ind;
+}	
+
+// Calculate reflected ray
+__host__ __device__ ray computeReflectedRay( ray currentRay, glm::vec3 intersection_normal, glm::vec3 intersection_point ) {
+	ray reflected_ray;
+	reflected_ray.origin = intersection_point;
+	reflected_ray.direction = -2*glm::dot(currentRay.direction, intersection_normal)*intersection_normal + currentRay.direction;
+	return reflected_ray;
 }
 
 //Kernel that blacks out a given image buffer
@@ -189,106 +256,54 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
   int index = x + (y * resolution.x);
 
-  ray r;
-  int min_intersection_ind;
+  int obj_index = -1;
   float intersection_dist = -1; // where is NaN / Infinity? dumb shit
-  float intersection_dist_new;
   glm::vec3 intersection_point;
   glm::vec3 intersection_normal;
   glm::vec3 intersection_point_new;
   glm::vec3 intersection_normal_new;
 
-  /*
-  float px_size_x = tan( cam.fov.x * (PI/180.0) );
-  float px_size_y = tan( cam.fov.y * (PI/180.0) );
-  */
+  // Ambient Component
+  //glm::vec3 ambient(0.2, 0.2, 0.5);
+  glm::vec3 ambient(0.0, 0.0, 0.0);
+
+  //glm::vec3 light( 10.0, 0.0, 0.0 );
+  glm::vec3 light(-5.0, 0.0, -2.0);
+  //glm::vec3 color(0.0, 0.0, 0.0);
+  glm::vec3 color = ambient;
+
+  glm::vec3 colorContribution(1.0,1.0,1.0);
 
   if((x<=resolution.x && y<=resolution.y)){
 	  
-	// Create ray using pinhole camera projection
-	/*
-	r.origin = cam.position;
-	r.direction = cam.view + (2*px_size_x*x/cam.resolution.x - px_size_x)*glm::cross( cam.view, cam.up ) \
-						   + (2*px_size_y*y/cam.resolution.y - px_size_y)*cam.up;
-    */
-	ray r = raycastFromCameraKernel( cam.resolution, time, x, y, cam.position, cam.view, cam.up, cam.fov );
-	min_intersection_ind = closestIntersection( r, geoms, numberOfGeoms, intersection_dist, intersection_normal, intersection_point );
-	/*
-	// Check for intersections. This has way too many branches :/
-	for (int i=0; i < numberOfGeoms; ++i ) {
-	    // Check for intersection with Sphere
-		if ( geoms[i].type == SPHERE ) {
-		    intersection_dist_new = sphereIntersectionTest(geoms[i], r, intersection_point_new, intersection_normal_new);		
-						
-		} else if ( geoms[i].type == CUBE ) {
-			intersection_dist_new = boxIntersectionTest(geoms[i], r, intersection_point_new, intersection_normal_new);		
-		} else if ( geoms[i].type == MESH ) {
-			// TODO
+	// Calculate initial ray as projected from camera
+	ray currentRay = raycastFromCameraKernel( cam.resolution, time, x, y, cam.position, cam.view, cam.up, cam.fov );
+	ray lightRay;
+
+	// Iteratively trace rays until depth is reached
+	int depth = 4;
+	for (int i=0; i<depth; ++i) {
+		obj_index = closestIntersection( currentRay, geoms, numberOfGeoms, intersection_dist, intersection_normal, intersection_point );
+		if (obj_index == -1) {
+			break;
 		}
-		if (intersection_dist_new != -1 ) {
+
+		//int mat_id = isShadowRay( lightRay,  geoms, numberOfGeoms, materials, numberOfMaterials ); 
+		int mat_id = isShadowRay( light, lightRay, geoms, numberOfGeoms, materials, numberOfMaterials, intersection_point );
+		if ( mat_id == -1 ) { 
+			color += colorContribution*computeLightContribution( materials[geoms[obj_index].materialid], currentRay, lightRay, intersection_normal, intersection_point );
+			colorContribution *= materials[geoms[obj_index].materialid].absorptionCoefficient;
+		}
+		// Calculate reflected rays
+		if ( materials[geoms[obj_index].materialid].hasReflective ) {
+			currentRay = computeReflectedRay( currentRay, intersection_normal, intersection_point );
+		}
 			
-			// If new distance is closer than previously seen one then use the new one
-			if ( intersection_dist_new < intersection_dist || intersection_dist == -1 ) {
-				intersection_dist = intersection_dist_new;
-				intersection_point = intersection_point_new;
-				intersection_normal = intersection_normal_new;
-				min_intersection_ind = i;
-			}
-		}	
-	}
-	*/
-	if (intersection_dist != -1 ) {
-		colors[index] = computeGeomColor( min_intersection_ind, geoms, materials, r, intersection_dist, intersection_normal, intersection_point );
-		/*
-		// Set color equal to material color
-		int mat_id = geoms[min_intersection_ind].materialid;
-		//colors[index] = materials[mat_id].color;
-
-		// Calculate Phong Lighting
-		// Start with arbritrarily chosen light source, lets say from the camera
-		
-		glm::vec3 debug_light_source(0.0, 0.0, 0.0);
-
-		glm::vec3 light_vector = glm::normalize(debug_light_source - intersection_point);
-		glm::vec3 viewing_vector = glm::normalize( r.origin - intersection_point ); 
-		glm::vec3 reflection_vector = 2*glm::dot( light_vector, intersection_normal )*intersection_normal - light_vector;
-		
-		// Calculate Phong Reflection Model ... this is mad inefficient at the moment
-		//float m_d = 1.0; //?
-		//float s_d = 1.0; //?
-		//float c_d = s_d*m_d*max( glm::dot( intersection_normal, light_vector ), 0.0 );
-		//float c_d = powf( max( glm::dot( light_vector, viewing_vector ), 0.0 ), materials[mat_id].specularExponent );
-		float ks = 1.0; // specular reflection constant
-		float kd = 0.5; // diffuse reflection constant
-		float ka = 0.5; // ambient reflection constant
-
-		// Ambient Component
-		glm::vec3 ambient(1.0, 1.0, 1.0);
-
-		// Diffuse Component
-		//glm::vec3 diffuseIntensity( 1.0, 1.0, 1.0 ); Not needed at the moment
-		float diffuse = max(glm::dot( light_vector, intersection_normal ), 0.0);
-
-		// Specular Component  
-		float specularExponent = materials[mat_id].specularExponent; // alpha, shinyiness
-		glm::vec3 specColor = materials[mat_id].specularColor;
-		glm::vec3 specular( 0.0, 0.0, 0.0 );
-		
-		if ( specularExponent > 0.0 ) {
-			specular = specColor*powf( max( glm::dot( reflection_vector, viewing_vector ), 0.0 ), specularExponent );
-		} 
-		
-		// Full illumination
-		glm::vec3 Illumination = ka*ambient + kd*diffuse + ks*specular;
-		colors[index] =  Illumination*materials[mat_id].color;
-		
-		//colors[index] = glm::vec3( 255, 0, 0 );
-		*/
-	} else {
-		colors[index] = glm::vec3( 0, 0, 0 );
 	}
     //colors[index] = generateRandomNumberFromThread(resolution, time, x, y);
+	colors[index] = color;
   }
+
 }
 
 //TODO: FINISH THIS FUNCTION
@@ -306,7 +321,7 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   glm::vec3* cudaimage = NULL;
   cudaMalloc((void**)&cudaimage, (int)renderCam->resolution.x*(int)renderCam->resolution.y*sizeof(glm::vec3));
   cudaMemcpy( cudaimage, renderCam->image, (int)renderCam->resolution.x*(int)renderCam->resolution.y*sizeof(glm::vec3), cudaMemcpyHostToDevice);
-  
+
   //package geometry and materials and sent to GPU
   staticGeom* geomList = new staticGeom[numberOfGeoms];
   for(int i=0; i<numberOfGeoms; i++){
@@ -353,5 +368,10 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   // make certain the kernel has completed
   cudaThreadSynchronize();
 
+
+  cudaError_t errorNum = cudaPeekAtLastError();
+  if ( errorNum != cudaSuccess ) { 
+      printf ("Cuda error -- %s\n", cudaGetErrorString(errorNum));
+  }
   checkCUDAError("Kernel failed!");
 }
