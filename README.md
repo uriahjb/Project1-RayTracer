@@ -9,6 +9,28 @@ Due Thursday, 09/19/2013
 -------------------------------------------------------------------------------
 PROJECT UPDATES:
 -------------------------------------------------------------------------------
+09/20/2013 Part 2:
+* Added shadows
+* Ran into quite a few issues with my code crashing the GPU and even Windows kernel on the Moore100 computers ( I think there is a div/0 somewhere in by box detector)
+* I still need to create a video and do a performance evaluation. It looks like the Moore100 computers lack the software needed for this. 
+* So far I have fulfilled:
+ * Raycasting from a camera into a scene through a pixel grid
+ * Phong lighting for one point light source
+ * Diffuse lambertian surfaces
+ * Raytraced shadows
+ * Cube intersection testing ( tentatively, depending on the location of the bug mentioned above )
+ * Sphere surface point sampling
+ * Specular reflection 
+
+
+Showing off reflections, shadows, etc ..
+![screenshot](https://raw.github.com/uriahjb/Project1-RayTracer/master/renders/lighting_reflections_shadows.png)
+
+
+A simple example to show off shadows
+![screenshot](https://raw.github.com/uriahjb/Project1-RayTracer/master/renders/shadow_example.png)
+
+
 09/20/2013:
 * Added reflections
 * Debugging code for shadows ( having some issues getting my collision detector
