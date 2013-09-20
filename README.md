@@ -9,6 +9,13 @@ Due Thursday, 09/19/2013
 -------------------------------------------------------------------------------
 PROJECT UPDATES:
 -------------------------------------------------------------------------------
+09/20/2013:
+* Added reflections
+* Debugging code for shadows ( having some issues getting my collision detector
+  to detect objects obscuring the light ). 
+![screenshot](https://raw.github.com/uriahjb/Project1-RayTracer/master/renders/lighting_plus_reflections.png)
+
+
 09/15/2013:
 * Fixed logic bug causing only one object to render at a time
 * Added Phong lighting ( ambient, diffuse, and specular ) as per:
