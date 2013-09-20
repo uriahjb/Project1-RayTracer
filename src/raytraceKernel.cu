@@ -22,7 +22,7 @@
     #include <cutil_math.h>
 #endif
 
-#define M_PI 3.14159265359.0f
+#define M_PI 3.14159265359f
 
 void checkCUDAError(const char *msg) {
   cudaError_t err = cudaGetLastError();
@@ -103,7 +103,7 @@ __host__ __device__ glm::vec3 computeGeomColor( int min_intersection_ind, static
 }
 
 // Compute Light Contribution to object
-__host__ __device__ glm::vec3 computeLightContribution(  material mat, ray current_ray, ray light_ray, glm::vec3 intersection_normal, glm::vec3 intersection_point ) {
+__host__ __device__ glm::vec3 computeLightContribution( float shadowContribution, material mat, ray current_ray, ray light_ray, glm::vec3 intersection_normal, glm::vec3 intersection_point ) {
 	glm::vec3 light_vector = light_ray.direction;
 	glm::vec3 viewing_vector = glm::normalize( current_ray.origin - intersection_point ); 
 	glm::vec3 reflection_vector = 2*glm::dot( light_vector, intersection_normal )*intersection_normal - light_vector;
@@ -127,7 +127,7 @@ __host__ __device__ glm::vec3 computeLightContribution(  material mat, ray curre
 	} 
 		
 	// Full illumination
-	glm::vec3 illumination = ka*ambient + kd*diffuse + ks*specular;
+	glm::vec3 illumination = ka*ambient + shadowContribution*kd*diffuse + shadowContribution*ks*specular;
 	return illumination*mat.color;
 }
 
@@ -166,6 +166,7 @@ __host__ __device__ int closestIntersection( ray r, staticGeom* geoms, int numbe
 // Check if ray to light is occluded by an object
 // This is going to be super inefficient, for each geom check if its a light if so trace a ray to 
 // it and see if that intersects with any other geoms. 
+/*
 __host__ __device__ int isShadowRay( glm::vec3 light, ray &light_ray, staticGeom* geoms, int numberOfGeoms, material* materials, int numberOfMaterials, glm::vec3 intersection_point ) {
 	// DOESN'T WORK YET!?!?
 	
@@ -194,6 +195,60 @@ __host__ __device__ int isShadowRay( glm::vec3 light, ray &light_ray, staticGeom
 	
 	return obj_ind;
 }	
+*/
+
+
+__host__ __device__ float isShadowRay(  ray light_ray, int intersection_geom_ind, staticGeom* geoms, int numberOfGeoms, material* materials, int numberOfMaterials ) {
+
+	float shadow_contribution = 1.0;
+
+	int min_intersection_ind = -1;
+
+	float intersection_dist = -1;
+	glm::vec3 intersection_point;
+	glm::vec3 intersection_normal;
+
+	float intersection_dist_new;
+	glm::vec3 intersection_point_new;
+	glm::vec3 intersection_normal_new;
+
+	for (int i=0; i < numberOfGeoms; ++i ) {
+		if ( i == intersection_geom_ind ) {
+			continue;
+		}
+
+	    // Check for intersection with Sphere
+		if ( geoms[i].type == SPHERE ) {
+		    intersection_dist_new = sphereIntersectionTest(geoms[i], light_ray, intersection_point_new, intersection_normal_new);		
+						
+		} else if ( geoms[i].type == CUBE ) {
+			intersection_dist_new = boxIntersectionTest(geoms[i], light_ray, intersection_point_new, intersection_normal_new);		
+		} else if ( geoms[i].type == MESH ) {
+			// TODO
+		}
+		if (intersection_dist_new != -1 ) {
+			
+			// If new distance is closer than previously seen one then use the new one
+			if ( intersection_dist_new < intersection_dist || intersection_dist == -1 ) {
+				intersection_dist = intersection_dist_new;
+				intersection_point = intersection_point_new;
+				intersection_normal = intersection_normal_new;
+				min_intersection_ind = i;
+				shadow_contribution = 0.0;
+			}
+		}	
+	}
+
+	return shadow_contribution;
+}	
+
+// Calculate light ray
+__host__ __device__ ray computeLightRay( glm::vec3 light, glm::vec3 intersection_point ) {
+	ray light_ray;
+	light_ray.origin = intersection_point;
+	light_ray.direction = glm::normalize(light - intersection_point);
+	return light_ray;
+}
 
 // Calculate reflected ray
 __host__ __device__ ray computeReflectedRay( ray currentRay, glm::vec3 intersection_normal, glm::vec3 intersection_point ) {
@@ -268,11 +323,18 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   glm::vec3 ambient(0.0, 0.0, 0.0);
 
   //glm::vec3 light( 10.0, 0.0, 0.0 );
-  glm::vec3 light(-5.0, 0.0, -2.0);
+  //glm::vec3 light(-10.0, 0.0, -2.0);
+
+  glm::vec3 light( 0.0, 2.0, 2.0 ); 
+
+  glm::vec3 light_sample;
+  ray light_ray;
   //glm::vec3 color(0.0, 0.0, 0.0);
   glm::vec3 color = ambient;
 
   glm::vec3 colorContribution(1.0,1.0,1.0);
+
+  float shadowContribution = 1.0;
 
   if((x<=resolution.x && y<=resolution.y)){
 	  
@@ -289,11 +351,31 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 		}
 
 		//int mat_id = isShadowRay( lightRay,  geoms, numberOfGeoms, materials, numberOfMaterials ); 
-		int mat_id = isShadowRay( light, lightRay, geoms, numberOfGeoms, materials, numberOfMaterials, intersection_point );
-		if ( mat_id == -1 ) { 
-			color += colorContribution*computeLightContribution( materials[geoms[obj_index].materialid], currentRay, lightRay, intersection_normal, intersection_point );
-			colorContribution *= materials[geoms[obj_index].materialid].absorptionCoefficient;
+
+		// Soft shadows
+		/* I'm sill not sure why, but this causes the GPU to crash and occasionally causes a 
+		   windows kernel failure on the Moore machines
+		int num_samples = 5;
+		float contAccum = 0.0;
+		float contribution;
+		for ( int j=0; j<num_samples; ++j ) {
+			light_sample = getRandomPointOnLight( light, 1.0, (float)j );
+			// Ray to light
+			lightRay = computeLightRay( light_sample, intersection_point );
+			contribution = isShadowRay( lightRay, obj_index, geoms, numberOfGeoms, materials, numberOfMaterials );
+			//contAccum += contribution;
+					
 		}
+		shadowContribution = contAccum/num_samples;
+		*/
+
+		lightRay = computeLightRay( light, intersection_point );
+		shadowContribution = isShadowRay( lightRay, obj_index, geoms, numberOfGeoms, materials, numberOfMaterials );
+			//int mat_id = isShadowRay( light, lightRay, geoms, numberOfGeoms, materials, numberOfMaterials, intersection_point );
+ 
+		color += colorContribution*computeLightContribution( shadowContribution, materials[geoms[obj_index].materialid], currentRay, lightRay, intersection_normal, intersection_point );
+		colorContribution *= materials[geoms[obj_index].materialid].absorptionCoefficient;
+
 		// Calculate reflected rays
 		if ( materials[geoms[obj_index].materialid].hasReflective ) {
 			currentRay = computeReflectedRay( currentRay, intersection_normal, intersection_point );

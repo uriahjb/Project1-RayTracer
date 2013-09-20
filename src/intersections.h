@@ -12,6 +12,9 @@
 #include "utilities.h"
 #include <thrust/random.h>
 
+
+#define M_PI 3.14159265359f
+
 //Some forward declarations
 __host__ __device__ glm::vec3 getPointOnRay(ray r, float t);
 __host__ __device__ glm::vec3 multiplyMV(cudaMat4 m, glm::vec4 v);
@@ -265,9 +268,51 @@ __host__ __device__ glm::vec3 getRandomPointOnCube(staticGeom cube, float random
 //TODO: IMPLEMENT THIS FUNCTION
 //Generates a random point on a given sphere
 __host__ __device__ glm::vec3 getRandomPointOnSphere(staticGeom sphere, float randomSeed){
+  /*
+	Generate random points on a sphere as per mathematica:
+		http://mathworld.wolfram.com/SpherePointPicking.html
+		(Muller 1959, Marsaglia 1972)
+  */
+  thrust::default_random_engine rng(hash(randomSeed));
+  thrust::uniform_real_distribution<float> u(0,1);
+  thrust::uniform_real_distribution<float> v(0,1);
 
-  return glm::vec3(0,0,0);
+  // Generate uniformly distributed theta and phi
+  float phi = 2*M_PI*(float)u(rng);
+  float theta = glm::acos( 2.0*(float)v(rng) - 1.0 );
+
+  // Convert from spherical to cartesian coordinates
+  float x = sphere.scale[0]*glm::cos( theta )*glm::sin( phi );
+  float y = sphere.scale[1]*glm::sin( theta )*glm::sin( phi );
+  float z = sphere.scale[2]*glm::cos( phi );
+
+  return sphere.translation + glm::vec3(x,y,z);
 }
+
+//Generates a random point on a light
+__host__ __device__ glm::vec3 getRandomPointOnLight(glm::vec3 light, float radius, float randomSeed){
+  /*
+	Generate random points on a sphere as per mathematica:
+		http://mathworld.wolfram.com/SpherePointPicking.html
+		(Muller 1959, Marsaglia 1972)
+  */
+  thrust::default_random_engine rng(hash(randomSeed));
+  thrust::uniform_real_distribution<float> u(0,1);
+  thrust::uniform_real_distribution<float> v(0,1);
+
+  // Generate uniformly distributed theta and phi
+  float phi = 2*M_PI*(float)u(rng);
+  float theta = glm::acos( 2.0*(float)v(rng) - 1.0 );
+
+  // Convert from spherical to cartesian coordinates
+  float x = radius*glm::cos( theta )*glm::sin( phi );
+  float y = radius*glm::sin( theta )*glm::sin( phi );
+  float z = radius*glm::cos( phi );
+
+  return light + glm::vec3(x,y,z);
+}
+
+
 
 #endif
 
