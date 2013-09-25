@@ -35,6 +35,9 @@ import ycm_core
 # compilation database set (by default, one is not set).
 # CHANGE THIS LIST OF FLAGS. YES, THIS IS THE DROID YOU HAVE BEEN LOOKING FOR.
 flags = [
+'-lglut',
+'-lGL',
+'-lGLEW',
 '-Wall',
 '-Wextra',
 '-Werror',
@@ -57,28 +60,8 @@ flags = [
 # For a C project, you would set this to 'c' instead of 'c++'.
 '-x',
 'c++',
-'-isystem',
-'../BoostParts',
-'-isystem',
-# This path will only work on OS X, but extra paths that don't exist are not
-# harmful
-'/System/Library/Frameworks/Python.framework/Headers',
-'-isystem',
-'../llvm/include',
-'-isystem',
-'../llvm/tools/clang/include',
-'-I',
-'.',
-'-I',
-'./ClangCompleter',
-'-isystem',
-'./tests/gmock/gtest',
-'-isystem',
-'./tests/gmock/gtest/include',
-'-isystem',
-'./tests/gmock',
-'-isystem',
-'./tests/gmock/include'
+'-I/usr/local/cuda/samples/common/inc',
+'-I/usr/local/cuda/include'
 ]
 
 # Set this to the absolute path to the folder (NOT the file!) containing the
@@ -140,10 +123,12 @@ def FlagsForFile( filename ):
     # NOTE: This is just for YouCompleteMe; it's highly likely that your project
     # does NOT need to remove the stdlib flag. DO NOT USE THIS IN YOUR
     # ycm_extra_conf IF YOU'RE NOT 100% YOU NEED IT.
+    '''
     try:
       final_flags.remove( '-stdlib=libc++' )
     except ValueError:
       pass
+    '''
   else:
     relative_to = DirectoryOfThisScript()
     final_flags = MakeRelativePathsInFlagsAbsolute( flags, relative_to )

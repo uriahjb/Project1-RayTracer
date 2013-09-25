@@ -20,7 +20,6 @@ int main(int argc, char** argv){
 	  glfwOpenWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	  glfwOpenWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   #endif
-
   // Set up pathtracer stuff
   bool loadedScene = false;
   finishedRender = false;
@@ -217,7 +216,6 @@ void runCuda(){
 }
 
 #ifdef __APPLE__
-
 	void display(){
 		runCuda();
 
