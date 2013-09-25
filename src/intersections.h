@@ -21,7 +21,8 @@ __host__ __device__ glm::vec3 multiplyMV(cudaMat4 m, glm::vec4 v);
 __host__ __device__ cudaMat4 removeScale( cudaMat4 m, glm::vec3 scale );
 __host__ __device__ glm::vec3 getSignOfRay(ray r);
 __host__ __device__ glm::vec3 getInverseDirectionOfRay(ray r);
-__host__ __device__ float boxIntersectionTest(staticGeom sphere, ray r, glm::vec3& intersectionPoint, glm::vec3& normal);
+__host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& intersectionPoint, glm::vec3& normal);
+__host__ __device__ float boxIntersectionTest(glm::vec3 boxMin, glm::vec3 boxMax, staticGeom box, ray r, glm::vec3& intersectionPoint, glm::vec3& normal);
 __host__ __device__ float sphereIntersectionTest(staticGeom sphere, ray r, glm::vec3& intersectionPoint, glm::vec3& normal);
 __host__ __device__ glm::vec3 getRandomPointOnCube(staticGeom cube, float randomSeed);
 
@@ -69,13 +70,13 @@ __host__ __device__ cudaMat4 removeScale( cudaMat4 m, glm::vec3 scale ) {
 	// or along each column. I'm not entirely sure which yet. 
 	cudaMat4 n = m;
 	n.x.x = m.x.x/scale[0];
-	n.x.y = m.x.y/scale[0];
-	n.x.z = m.x.z/scale[0];
-	n.y.x = m.y.x/scale[1];
+	n.x.y = m.x.y/scale[1];
+	n.x.z = m.x.z/scale[2];
+	n.y.x = m.y.x/scale[0];
 	n.y.y = m.y.y/scale[1];
-	n.y.z = m.y.z/scale[1];
-	n.z.x = m.z.x/scale[2];
-	n.z.y = m.z.y/scale[2];
+	n.y.z = m.y.z/scale[2];
+	n.z.x = m.z.x/scale[0];
+	n.z.y = m.z.y/scale[1];
 	n.z.z = m.z.z/scale[2];
 	return n;
 }
@@ -91,81 +92,189 @@ __host__ __device__ glm::vec3 getSignOfRay(ray r){
   return glm::vec3((int)(inv_direction.x < 0), (int)(inv_direction.y < 0), (int)(inv_direction.z < 0));
 }
 
+//Wrapper for cube intersection test for testing against unit cubes
+__host__ __device__  float boxIntersectionTest(staticGeom box, ray r, glm::vec3& intersectionPoint, glm::vec3& normal){
+  return boxIntersectionTest(glm::vec3(-.5,-.5,-.5), glm::vec3(.5,.5,.5), box, r, intersectionPoint, normal);
+}
+
+//Cube intersection test, return -1 if no intersection, otherwise, distance to intersection
+__host__ __device__  float boxIntersectionTest(glm::vec3 boxMin, glm::vec3 boxMax, staticGeom box, ray r, glm::vec3& intersectionPoint, glm::vec3& normal){
+    glm::vec3 currentNormal = glm::vec3(0,0,0);
+
+    ray ro = r;
+
+    glm::vec3 iP0 = multiplyMV(box.inverseTransform,glm::vec4(r.origin, 1.0f));
+    glm::vec3 iP1 = multiplyMV(box.inverseTransform,glm::vec4(r.origin+r.direction, 1.0f));
+    glm::vec3 iV0 = iP1 - iP0;
+
+    r.origin = iP0; 
+    r.direction = glm::normalize(iV0);
+
+    float tmin, tmax, tymin, tymax, tzmin, tzmax;
+
+    glm::vec3 rsign = getSignOfRay(r);
+    glm::vec3 rInverseDirection = getInverseDirectionOfRay(r);
+
+    if((int)rsign.x==0){
+      tmin = (boxMin.x - r.origin.x) * rInverseDirection.x;
+      tmax = (boxMax.x - r.origin.x) * rInverseDirection.x;
+    }else{
+      tmin = (boxMax.x - r.origin.x) * rInverseDirection.x;
+      tmax = (boxMin.x - r.origin.x) * rInverseDirection.x;
+    }
+
+    if((int)rsign.y==0){
+      tymin = (boxMin.y - r.origin.y) * rInverseDirection.y;
+      tymax = (boxMax.y - r.origin.y) * rInverseDirection.y;
+    }else{
+      tymin = (boxMax.y - r.origin.y) * rInverseDirection.y;
+      tymax = (boxMin.y - r.origin.y) * rInverseDirection.y;
+    }
+
+    if ( (tmin > tymax) || (tymin > tmax) ){
+        return -1;
+    }
+    
+    if (tymin > tmin){
+        tmin = tymin;
+    }
+    if (tymax < tmax){
+        tmax = tymax;
+    }
+    
+
+    if((int)rsign.z==0){
+      tzmin = (boxMin.z - r.origin.z) * rInverseDirection.z;
+      tzmax = (boxMax.z - r.origin.z) * rInverseDirection.z;
+    }else{
+      tzmin = (boxMax.z - r.origin.z) * rInverseDirection.z;
+      tzmax = (boxMin.z - r.origin.z) * rInverseDirection.z;
+    }
+
+    if ( (tmin > tzmax) || (tzmin > tmax) ){
+        return -1;
+    }
+    if (tzmin > tmin){
+        tmin = tzmin;
+    }
+    if (tzmax < tmax){
+        tmax = tzmax;
+    }
+    if(tmin<0){
+        return -1;
+    }
+
+    glm::vec3 osintersect = r.origin + tmin*r.direction;
+
+    float tol = 0.001;
+    if(abs(osintersect.x-abs(boxMax.x))<tol){
+        currentNormal = glm::vec3(1,0,0);
+    }else if(abs(osintersect.y-abs(boxMax.y))<tol){
+        currentNormal = glm::vec3(0,1,0);
+    }else if(abs(osintersect.z-abs(boxMax.z))<tol){
+        currentNormal = glm::vec3(0,0,1);
+    }else if(abs(osintersect.x+abs(boxMin.x))<tol){
+        currentNormal = glm::vec3(-1,0,0);
+    }else if(abs(osintersect.y+abs(boxMin.y))<tol){
+        currentNormal = glm::vec3(0,-1,0);
+    }else if(abs(osintersect.z+abs(boxMin.z))<tol){
+        currentNormal = glm::vec3(0,0,-1);
+    } 
+
+    intersectionPoint = multiplyMV(box.transform, glm::vec4(osintersect, 1.0f));
+
+    //normal = multiplyMV(removeScale( box.transform, box.scale ), glm::vec4(currentNormal,0.0f));
+    normal = glm::normalize( multiplyMV(box.transform, glm::vec4(currentNormal,0.0f)) );
+    return glm::length(intersectionPoint-ro.origin);
+}
 //TODO: IMPLEMENT THIS FUNCTION
 //Cube intersection test, return -1 if no intersection, otherwise, distance to intersection
-__host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& intersectionPoint, glm::vec3& normal){
-	/*
+/*
+__host__ __device__ float boxIntersectionTest(staticGeom box, ray ro, glm::vec3& intersectionPoint, glm::vec3& intersectionNormal){
 		Compute cube intersection using line-plane intersection as per wikipedia
 		en.wikipedia/wiki/Line-Plane_Intersection
 
-		For each normal of the plane compute:
-			d = dot((p0 - l0), n) / dot(l, n) checking for parallel and in-plane conditions
-		
-		Find the closest intersection point and check if it is within the x-y-z bounds of the cube
-	*/
+		Cube intersection motived from http://people.csail.mit.edu/amy/papers/box-jgt.pdf
 
-	// Convert global ray coordinates to local box coordinates   
-	cudaMat4 inv_tf_no_scale = removeScale( box.inverseTransform, glm::vec3( 1/box.scale.x, 1/box.scale.y, 1/box.scale.z));
+	glm::vec3 r0 = multiplyMV(box.inverseTransform, glm::vec4(ro.origin,1.0f));
+	glm::vec3 r1 = multiplyMV(box.inverseTransform, glm::vec4(ro.origin+ro.direction,1.0f));
 
-	glm::vec3 ro = multiplyMV(inv_tf_no_scale, glm::vec4(r.origin,1.0f));
-	glm::vec3 rd = glm::normalize(multiplyMV(inv_tf_no_scale, glm::vec4(r.direction,0.0f)));
-	ray rt; rt.origin = ro; rt.direction = rd;
-	
-	bool is_valid = false;
-	float t;
-	float min_t = 0;
-	glm::vec3 face_pos;
-	glm::vec3 face_pos_norm;
+	ray r;
+	r.origin = r0;
+	r.direction = glm::normalize(r1 - r0);
 
-	for (int i=0; i < 6; ++i ) {
-		//glm::vec3 face_pos(  0.0,  0.0,  0.0 );
-		//glm::vec3 face_pos_norm( 0.0,  0.0,  1.0);
-		int ind = i % 3;
-		face_pos = glm::vec3( 0.0, 0.0, 0.0 );
-		face_pos_norm = glm::vec3( 0.0, 0.0, 0.0 );
-		if ( i < 3 ) {
-			face_pos[ind] = box.scale[ind]/2;
-			face_pos_norm[ind] = 1.0;
-		} else {
-			face_pos[ind] = -box.scale[ind]/2;
-			face_pos_norm[ind] = -1.0;
-		}
-		float den = glm::dot( rt.direction, face_pos_norm );
-		float num = glm::dot( face_pos - rt.origin, face_pos_norm );
+	glm::vec3 rsign = getSignOfRay(r);
+	glm::vec3 rInv = getInverseDirectionOfRay(r);
 
-		float tol = 1e-6;
-		if ( abs(num) < tol ) {
-			continue;
-		}
-		if ( abs(den) < tol ) {
-			continue;
-		}
-		t = num/den;
-		// add 0.001 to account for the 0.001 subtracted in getPointOnRay
-		glm::vec3 localIntersectionPoint = getPointOnRay( rt, t + 0.001 );
-		if ( localIntersectionPoint.x >= box.scale.x/2 || localIntersectionPoint.x <= -box.scale.x/2 
-		  || localIntersectionPoint.y >= box.scale.y/2 || localIntersectionPoint.y <= -box.scale.y/2
-		  || localIntersectionPoint.z >= box.scale.z/2 || localIntersectionPoint.z <= -box.scale.z/2) {
-			continue;
-		}
-		min_t = min(t, min_t);
-		is_valid = true;
+	float dxmin, dxmax, dymin, dymax, dzmin, dzmax;
+
+	float divx = 1/r.direction.x;
+	if ( (int)rsign.x == 0 ) {
+	  dxmin = (-0.5 - r.origin.x )*divx;
+	  dxmax = (0.5 - r.origin.x )*divx;
+	} else {
+	  dxmin = (0.5 - r.origin.x )*divx;
+	  dxmax = (-0.5 - r.origin.x )*divx;
 	}
-	if (!is_valid) {
-		return -1;
+	float divy = 1/r.direction.y;
+	if ( (int)rsign.y == 0 ) {
+	  dymin = (-0.5 - r.origin.y )*divy;
+	  dymax = (0.5 - r.origin.y )*divy;
+	} else {
+	  dymin = (0.5 - r.origin.y )*divy;
+	  dymax = (-0.5 - r.origin.y )*divy;
+	}
+	if ((dxmin > dymax ) || ( dymin > dxmax ))
+	  return -1;
+	if ( dymin > dxmin )
+	  dxmin = dymin;
+	if ( dymax < dxmax ) 
+	  dxmax = dymax;
+
+	float divz = 1/r.direction.z;
+	if ( (int)rsign.z == 0 ) {
+	  dzmin = (-0.5 - r.origin.z )*divz;
+	  dzmax = (0.5 - r.origin.z )*divz;
+	} else {
+	  dzmin = (0.5 - r.origin.z )*divz;
+	  dzmax = (-0.5 - r.origin.z )*divz;
+	}
+	if ((dxmin > dzmax ) || ( dzmin > dxmax ))
+	  return -1;
+	if ( dzmin > dxmax )
+	  dxmin = dzmin;
+	if ( dzmax < dxmin ) 
+	  dxmax = dzmax;
+
+	if ( dxmin < 0 )
+	  return -1;
+	
+	// Look at intersection and determine which normal it is 
+	// Copied from project 2 source code
+	glm::vec3 localIntersection = r.origin + dxmin*r.direction;
+	glm::vec3 localNormal;
+
+	float tol = 0.001;
+	if(abs(localIntersection.x-abs(0.5))<tol){
+	    localNormal = glm::vec3(1,0,0);
+	}else if(abs(localIntersection.y-abs(0.5))<tol){
+	    localNormal = glm::vec3(0,1,0);
+	}else if(abs(localIntersection.z-abs(0.5))<tol){
+	    localNormal = glm::vec3(0,0,1);
+	}else if(abs(localIntersection.x+abs(-0.5))<tol){
+	    localNormal = glm::vec3(-1,0,0);
+	}else if(abs(localIntersection.y+abs(-0.5))<tol){
+	    localNormal = glm::vec3(0,-1,0);
+	}else if(abs(localIntersection.z+abs(-0.5))<tol){
+	    localNormal = glm::vec3(0,0,-1);
 	}
 
-	//float t = 0.0;
-	cudaMat4 tf_no_scale = removeScale( box.transform, box.scale );
-	glm::vec3 realIntersectionPoint = multiplyMV(tf_no_scale, glm::vec4(getPointOnRay(rt, t), 1.0));
-    glm::vec3 realOrigin = multiplyMV(tf_no_scale, glm::vec4(0,0,0,1));
-	
-    intersectionPoint = realIntersectionPoint;
-    normal = glm::normalize(realIntersectionPoint - realOrigin);
+	intersectionPoint = multiplyMV( box.transform, glm::vec4( localIntersection, 1.0f ));
+	intersectionNormal = multiplyMV( box.transform, glm::vec4( localNormal, 1.0f ));
 
-	return t;
-    //return glm::length(r.origin - realIntersectionPoint);
+	return glm::length( intersectionPoint - ro.origin );
 }
+*/
 
 //LOOK: Here's an intersection test example from a sphere. Now you just need to figure out cube and, optionally, triangle.
 //Sphere intersection test, return -1 if no intersection, otherwise, distance to intersection

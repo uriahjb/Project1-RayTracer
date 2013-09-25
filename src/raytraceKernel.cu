@@ -24,6 +24,8 @@
 
 #define M_PI 3.14159265359f
 
+enum { DEBUG_COLLISIONS, DEBUG_SHADOWS, DEBUG_REFLECTIONS, DEBUG_DIFFUSE, DEBUG_NORMALS, DEBUG_ALL };
+
 void checkCUDAError(const char *msg) {
   cudaError_t err = cudaGetLastError();
   if( cudaSuccess != err) {
@@ -53,7 +55,7 @@ __host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time
   ray r;
   r.origin = eye;
   r.direction = view + (-2*px_size_x*x/resolution.x + px_size_x)*glm::cross( view, up ) \
-				     + (-2*px_size_y*y/resolution.y + px_size_y)*up;
+		     + (-2*px_size_y*y/resolution.y + px_size_y)*up;
 
   return r;
 }
@@ -269,18 +271,20 @@ __global__ void clearImage(glm::vec2 resolution, glm::vec3* image){
 }
 
 //Kernel that writes the image to the OpenGL PBO directly.
-__global__ void sendImageToPBO(uchar4* PBOpos, glm::vec2 resolution, glm::vec3* image){
+__global__ void sendImageToPBO(uchar4* PBOpos, glm::vec2 resolution, glm::vec3* image, int iterations){
   
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
   int index = x + (y * resolution.x);
+
+  float scl = 1.0f/((float)iterations);
   
   if(x<=resolution.x && y<=resolution.y){
 
       glm::vec3 color;
-      color.x = image[index].x*255.0;
-      color.y = image[index].y*255.0;
-      color.z = image[index].z*255.0;
+      color.x = scl*image[index].x*255.0;
+      color.y = scl*image[index].y*255.0;
+      color.z = scl*image[index].z*255.0;
 
       if(color.x>255){
         color.x = 255;
@@ -305,7 +309,8 @@ __global__ void sendImageToPBO(uchar4* PBOpos, glm::vec2 resolution, glm::vec3* 
 //TODO: IMPLEMENT THIS FUNCTION
 //Core raytracer kernel
 __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3* colors,
-                            staticGeom* geoms, int numberOfGeoms, material* materials, int numberOfMaterials){
+                            staticGeom* geoms, int numberOfGeoms, material* materials, int numberOfMaterials, 
+			    int debugMode ){
 
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -320,12 +325,12 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 
   // Ambient Component
   //glm::vec3 ambient(0.2, 0.2, 0.5);
-  glm::vec3 ambient(0.0, 0.0, 0.0);
+  glm::vec3 ambient;
 
   //glm::vec3 light( 10.0, 0.0, 0.0 );
   //glm::vec3 light(-10.0, 0.0, -2.0);
 
-  glm::vec3 light( 0.0, 2.0, 2.0 ); 
+  glm::vec3 light( 0.0, 2.0, 8.0 ); 
 
   glm::vec3 light_sample;
   ray light_ray;
@@ -343,47 +348,54 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 	ray lightRay;
 
 	// Iteratively trace rays until depth is reached
-	int depth = 4;
+	int depth;
+	if ( debugMode == DEBUG_ALL || debugMode == DEBUG_REFLECTIONS ) {
+	  depth = 4;
+	} else {
+	  depth = 1;
+	}
+
 	for (int i=0; i<depth; ++i) {
 		obj_index = closestIntersection( currentRay, geoms, numberOfGeoms, intersection_dist, intersection_normal, intersection_point );
 		if (obj_index == -1) {
 			break;
 		}
 
-		//int mat_id = isShadowRay( lightRay,  geoms, numberOfGeoms, materials, numberOfMaterials ); 
-
-		// Soft shadows
-		/* I'm sill not sure why, but this causes the GPU to crash and occasionally causes a 
-		   windows kernel failure on the Moore machines
-		int num_samples = 5;
-		float contAccum = 0.0;
-		float contribution;
-		for ( int j=0; j<num_samples; ++j ) {
-			light_sample = getRandomPointOnLight( light, 1.0, (float)j );
-			// Ray to light
-			lightRay = computeLightRay( light_sample, intersection_point );
-			contribution = isShadowRay( lightRay, obj_index, geoms, numberOfGeoms, materials, numberOfMaterials );
-			//contAccum += contribution;
-					
-		}
-		shadowContribution = contAccum/num_samples;
-		*/
-
-		lightRay = computeLightRay( light, intersection_point );
+		light_sample = getRandomPointOnLight( light, 0.25, index*time );
+		lightRay = computeLightRay( light_sample, intersection_point );
 		shadowContribution = isShadowRay( lightRay, obj_index, geoms, numberOfGeoms, materials, numberOfMaterials );
-			//int mat_id = isShadowRay( light, lightRay, geoms, numberOfGeoms, materials, numberOfMaterials, intersection_point );
- 
-		color += colorContribution*computeLightContribution( shadowContribution, materials[geoms[obj_index].materialid], currentRay, lightRay, intersection_normal, intersection_point );
-		colorContribution *= materials[geoms[obj_index].materialid].absorptionCoefficient;
+		if ( debugMode == DEBUG_ALL ) {
+		  // All? Debug Mode
+			  //int mat_id = isShadowRay( light, lightRay, geoms, numberOfGeoms, materials, numberOfMaterials, intersection_point );
+   
+		  color += colorContribution*computeLightContribution( shadowContribution, materials[geoms[obj_index].materialid], currentRay, lightRay, intersection_normal, intersection_point );
+		  colorContribution *= materials[geoms[obj_index].materialid].absorptionCoefficient;
 
-		// Calculate reflected rays
-		if ( materials[geoms[obj_index].materialid].hasReflective ) {
-			currentRay = computeReflectedRay( currentRay, intersection_normal, intersection_point );
+		  // Calculate reflected rays
+		  if ( materials[geoms[obj_index].materialid].hasReflective ) {
+		    currentRay = computeReflectedRay( currentRay, intersection_normal, intersection_point );
+		  }
+		} else if ( debugMode == DEBUG_SHADOWS ) {
+		  // Shadows debug mode
+		  float diffuse = max(glm::dot( lightRay.direction, intersection_normal ), 0.0);
+		  ambient = glm::vec3( 0.25, 0.25, 0.25 );
+		  color =  shadowContribution*glm::vec3(1.0,1.0,1.0)*diffuse + ambient;
+		} else if ( debugMode == DEBUG_DIFFUSE ) {
+		  float diffuse = glm::dot( lightRay.direction, intersection_normal );
+		  color = 0.5f*glm::vec3(1.0,1.0,1.0)*diffuse + 0.5f;
+		} else if ( debugMode == DEBUG_COLLISIONS ) {
+		  // Collisions debug mode
+		  color = materials[geoms[obj_index].materialid].color;
+		} else if ( debugMode == DEBUG_NORMALS ) { 
+		  color = 0.5f*intersection_normal + 0.5f;
+		  //color = 0.5f*glm::vec3(0.0, 0.0, -1.0) + 0.5f;
+		  //color = 0.5f*lightRay.direction + 0.5f;
 		}
-			
 	}
     //colors[index] = generateRandomNumberFromThread(resolution, time, x, y);
-	colors[index] = color;
+	// Accumulate in image buffer 
+	//colors[index] = color;
+	colors[index] += color;
   }
 
 }
@@ -434,10 +446,15 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cam.up = renderCam->ups[frame];
   cam.fov = renderCam->fov;
 
-  //kernel launches
-  raytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms, cudamaterials, numberOfMaterials);
+  //int debugMode = DEBUG_COLLISIONS;
+  int debugMode = DEBUG_ALL;
+  //int debugMode = DEBUG_DIFFUSE;
+  //int debugMode = DEBUG_NORMALS;
 
-  sendImageToPBO<<<fullBlocksPerGrid, threadsPerBlock>>>(PBOpos, renderCam->resolution, cudaimage);
+  //kernel launches
+  raytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms, cudamaterials, numberOfMaterials, debugMode);
+
+  sendImageToPBO<<<fullBlocksPerGrid, threadsPerBlock>>>(PBOpos, renderCam->resolution, cudaimage, iterations);
 
   //retrieve image from GPU
   cudaMemcpy( renderCam->image, cudaimage, (int)renderCam->resolution.x*(int)renderCam->resolution.y*sizeof(glm::vec3), cudaMemcpyDeviceToHost);
@@ -449,7 +466,6 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
 
   // make certain the kernel has completed
   cudaThreadSynchronize();
-
 
   cudaError_t errorNum = cudaPeekAtLastError();
   if ( errorNum != cudaSuccess ) { 

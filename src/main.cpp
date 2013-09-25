@@ -160,98 +160,8 @@ void runCuda(){
       materials[i] = renderScene->materials[i];
     }
     
-	// DEBUGGING
-	/*
-	ray r;
-	camera cam = *renderCam;
-	int x = 400;
-	int y = 400;
-	float px_size_x = tan( cam.fov.x * (PI/180.0) );
-	float px_size_y = tan( cam.fov.y * (PI/180.0) );
-
-	r.direction = cam.views[0] + px_size_x*x/cam.resolution.x*glm::cross( cam.views[0], cam.ups[0] ) \
-							   + px_size_y*y/cam.resolution.y*cam.ups[0];
-	printf( "Camera view: [%f, %f, %f] \n\r", cam.views[0].x, cam.views[0].y, cam.views[0].z );
-	printf( "Camera fov: [%f, %f] \n\r", cam.fov.x, cam.fov.y ); 
-	printf( "ray direction: [%f, %f, %f] \n\r", r.direction.x, r.direction.y, r.direction.z);
-    */
-    // DEBUGGING LINE-PLANE INTERSECTION
-	// Pull box outta geoms
-	/*
-	  //package geometry and materials and sent to GPU
-	  int numberOfGeoms = renderScene->objects.size();
-	  int frame = 0;
-	  staticGeom* geomList = new staticGeom[numberOfGeoms];
-	  for(int i=0; i<numberOfGeoms; i++){
-		staticGeom newStaticGeom;
-		newStaticGeom.type = geoms[i].type;
-		newStaticGeom.materialid = geoms[i].materialid;
-		newStaticGeom.translation = geoms[i].translations[frame];
-		newStaticGeom.rotation = geoms[i].rotations[frame];
-		newStaticGeom.scale = geoms[i].scales[frame];
-		newStaticGeom.transform = geoms[i].transforms[frame];
-		newStaticGeom.inverseTransform = geoms[i].inverseTransforms[frame];
-		geomList[i] = newStaticGeom;
-	  }
-
-	
-    camera cam = *renderCam;
-	
-	int x = 200;
-	int y = 200;
-
-	staticGeom box = geomList[3];
-	float px_size_x = tan( cam.fov.x * (PI/180.0) );
-	float px_size_y = tan( cam.fov.y * (PI/180.0) );
-	
-	ray r;
-	r.origin = cam.positions[0];
-	r.direction = cam.views[0] + (2*px_size_x*x/cam.resolution.x - px_size_x)*glm::cross( cam.positions[0], cam.ups[0] ) \
-       				           + (2*px_size_y*y/cam.resolution.y - px_size_y)*cam.ups[0];
-	// There are few things more frustrating than a transformation matrix that has the 
-	// scale rolled into it. 
-	printf( "box tf: \n" );
-	printMat4( box.transform );
-	printf( "box tf no scale: \n" );
-	printMat4( removeScaleDbg(box.transform, box.scale) );
-	printf( "box inv tf: \n");
-	printMat4( box.inverseTransform );
-	printf( "box inv tf no scale: \n");
-	printMat4( removeScaleDbg(box.inverseTransform, glm::vec3( 1/box.scale.x, 1/box.scale.y, 1/box.scale.z)) );
-
-	
-	//glm::vec3 ro = multiplyMVDbg(box.inverseTransform, glm::vec4(r.origin,1.0f));
-	//glm::vec3 rd = glm::normalize(multiplyMVDbg(box.inverseTransform, glm::vec4(r.direction,0.0f)));
-
-	cudaMat4 inv_tf_no_scale = removeScaleDbg( box.inverseTransform,  glm::vec3( 1/box.scale.x, 1/box.scale.y, 1/box.scale.z));
-
-	glm::vec3 ro = multiplyMVDbg(inv_tf_no_scale, glm::vec4(r.origin,1.0f));
-	glm::vec3 rd = glm::normalize(multiplyMVDbg(inv_tf_no_scale, glm::vec4(r.direction,0.0f)));
-
-	ray rt; rt.origin = ro; rt.direction = rd;
-
-	glm::vec3 zf_pos(  0.0,  0.0,  0.0 );
-	glm::vec3 zf_pos_norm( 0.0,  0.0,  1.0);
-	float den = glm::dot( rt.direction, zf_pos_norm );
-	float num = glm::dot( zf_pos - rt.origin, zf_pos_norm );
-
-	printf( "box position: [%f, %f, %f] \n", box.translation.x, box.translation.y, box.translation.z ); 
-	printf( "ray origin: [%f, %f, %f] \n", r.origin.x, r.origin.y, r.origin.z );
-    printf( "ray direction: [%f, %f, %f] \n", r.direction.x, r.direction.y, r.direction.z );
-	printf( "ray tf origin: [%f, %f, %f] \n", rt.origin.x, rt.origin.y, rt.origin.z );
-	printf( "ray tf direction: [%f, %f, %f] \n", rt.direction.x, rt.direction.y, rt.direction.z );
-	printf( "den: %f \n", den );
-	printf( "num: %f \n", num );
-	float tol = 1e-6;
-	if (abs(num) > tol && abs(den) > tol) {
-		float d = num/den;
-		glm::vec3 intersection_point = rt.origin + d*glm::normalize( rt.direction );
-		printf( "intersection_point:  [%f, %f, %f] \n", intersection_point.x, intersection_point.y, intersection_point.z ); 
-	}
-	*/
-
-
     // execute the kernel
+    printf( "iterations: %d \n", iterations );
     cudaRaytraceCore(dptr, renderCam, targetFrame, iterations, materials, renderScene->materials.size(), geoms, renderScene->objects.size() );
     
     // unmap buffer object
@@ -294,9 +204,11 @@ void runCuda(){
       //clear image buffer and move onto next frame
       targetFrame++;
       iterations = 0;
+      /*
       for(int i=0; i<renderCam->resolution.x*renderCam->resolution.y; i++){
         renderCam->image[i] = glm::vec3(0,0,0);
       }
+      */
       cudaDeviceReset(); 
       finishedRender = false;
     }
