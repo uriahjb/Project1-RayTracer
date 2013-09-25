@@ -9,6 +9,18 @@ Due Thursday, 09/19/2013
 -------------------------------------------------------------------------------
 PROJECT UPDATES:
 -------------------------------------------------------------------------------
+09/24/2013:
+* Configured a linux machine for CUDA development, woo!!!
+* Added soft shadows and fixed box collisions based off of implementation in project2-pathtracer code
+* Started the process of cleaning up code / added debug modes so that I can effectively work towards a pathtracer
+* I'm definitely looking forwad to implementing anti-aliasing
+* A set of screenshots with various debug-modes to come soon!
+
+Image with corrected box intersections, soft-shadows, refections, etc ...
+![screenshot](https://raw.github.com/uriahjb/Project1-RayTracer/master/renders/soft_shadows.bmp)
+
+
+
 09/20/2013 Part 2:
 * Added shadows
 * Ran into quite a few issues with my code crashing the GPU and even Windows kernel on the Moore100 computers ( I think there is a div/0 somewhere in by box detector)
